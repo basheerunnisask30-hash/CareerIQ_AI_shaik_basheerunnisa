@@ -4,8 +4,18 @@ async function fetchWithRetry(url, options, maxAttempts = 3) {
     let response;
 
     try {
-      response = await fetch(url, options);
+      response = await fetch(url, {
+        ...options,
+        signal: AbortSignal.timeout(30000)
+      });
     } catch (error) {
+      if (error.name === "TimeoutError" ||
+        error.name === "AbortError") {
+        throw new Error(
+          "The AI request timed out. Please try again."
+        );
+      }
+
       if (attempt === maxAttempts - 1) throw error;
 
       await new Promise(resolve =>
