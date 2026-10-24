@@ -1,4 +1,34 @@
 
+
+async function fetchWithRetry(url, options, maxAttempts = 3) {
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    let response;
+
+    try {
+      response = await fetch(url, options);
+    } catch (error) {
+      // Retry network errors, but stop after the last attempt.
+      if (attempt === maxAttempts - 1) throw error;
+    }
+
+    if (response) {
+      const shouldRetry = [429, 500, 503].includes(response.status);
+
+      if (!shouldRetry || attempt === maxAttempts - 1) {
+        return response;
+      }
+
+      // Release the response body before retrying.
+      await response.body?.cancel();
+    }
+
+    // Wait 1 second, then 2 seconds before the next attempt.
+    const delay = 1000 * (2 ** attempt);
+    await new Promise(resolve => setTimeout(resolve, delay));
+  }
+}
+
+
 export default async function handler(req, res) {
   if (req.method !== "POST") {
     return res.status(405).json({
@@ -35,7 +65,7 @@ export default async function handler(req, res) {
       "\n\nJob Description:\n" + jobDescription +
       "\n\nProvide your analysis as a JSON object with the exact fields specified.";
 
-    const response = await fetch(
+    const response = await fetchWithRetry(
       "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent",
       {
         method: "POST",
