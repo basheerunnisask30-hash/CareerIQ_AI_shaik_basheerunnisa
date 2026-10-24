@@ -1,5 +1,4 @@
 
-
 async function fetchWithRetry(url, options, maxAttempts = 3) {
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     let response;
@@ -7,27 +6,32 @@ async function fetchWithRetry(url, options, maxAttempts = 3) {
     try {
       response = await fetch(url, options);
     } catch (error) {
-      // Retry network errors, but stop after the last attempt.
       if (attempt === maxAttempts - 1) throw error;
+
+      await new Promise(resolve =>
+        setTimeout(resolve, 1000 * (2 ** attempt))
+      );
+      continue;
     }
 
-    if (response) {
-      const shouldRetry = [429, 500, 503].includes(response.status);
+    // Never retry 429 responses. They may indicate
+    // an exhausted daily quota.
+    if (response.status === 429) return response;
 
-      if (!shouldRetry || attempt === maxAttempts - 1) {
-        return response;
-      }
-
-      // Release the response body before retrying.
-      await response.body?.cancel();
+    // Retry only temporary server errors.
+    if (![500, 503].includes(response.status)) {
+      return response;
     }
 
-    // Wait 1 second, then 2 seconds before the next attempt.
-    const delay = 1000 * (2 ** attempt);
-    await new Promise(resolve => setTimeout(resolve, delay));
+    if (attempt === maxAttempts - 1) return response;
+
+    await response.body?.cancel();
+
+    await new Promise(resolve =>
+      setTimeout(resolve, 1000 * (2 ** attempt))
+    );
   }
 }
-
 
 export default async function handler(req, res) {
   if (req.method !== "POST") {
@@ -48,8 +52,7 @@ export default async function handler(req, res) {
     const { resume, jobDescription, systemPrompt } = req.body || {};
 
     if (
-      typeof resume !== "string" ||
-      !resume.trim() ||
+      typeof resume !== "string" || !resume.trim() ||
       typeof jobDescription !== "string" ||
       !jobDescription.trim() ||
       typeof systemPrompt !== "string"
@@ -74,11 +77,7 @@ export default async function handler(req, res) {
           "x-goog-api-key": apiKey
         },
         body: JSON.stringify({
-          contents: [
-            {
-              parts: [{ text: prompt }]
-            }
-          ],
+          contents: [{ parts: [{ text: prompt }] }],
           generationConfig: {
             temperature: 0.2,
             maxOutputTokens: 4096,
@@ -90,17 +89,40 @@ export default async function handler(req, res) {
 
     const data = await response.json();
 
-   if (!response.ok) {
-      const details = data.error?.message || "Unknown Gemini API error";
+    if (!response.ok) {
+      const details =
+        data.error?.message || "Unknown Gemini API error";
 
-       console.error("Gemini request failed:", response.status, details);
+      console.error(
+        "Gemini request failed:",
+        response.status,
+        details
+      );
 
-       return res.status(502).json({
-         error: `Gemini API error (${response.status}): ${details}`
-     });
-   } 
+      if (response.status === 429) {
+        const dailyQuota =
+          /per day|daily quota|requests per day|\bRPD\b|per_day/i.test(details);
 
-    const aiResponse = data.candidates?.[0]?.content?.parts?.[0]?.text;
+        if (dailyQuota) {
+          return res.status(429).json({
+            error:
+              "The AI service has reached its daily free-tier quota. Please try again after the quota resets. No retries were made."
+          });
+        }
+
+        return res.status(429).json({
+          error:
+            "The AI service is temporarily rate-limited. Please wait a short time before trying again. No retries were made."
+        });
+      }
+
+      return res.status(502).json({
+        error: `Gemini API error (${response.status}): ${details}`
+      });
+    }
+
+    const aiResponse =
+      data.candidates?.[0]?.content?.parts?.[0]?.text;
 
     if (!aiResponse) {
       return res.status(502).json({
@@ -131,7 +153,10 @@ export default async function handler(req, res) {
 
     return res.status(200).json({ analysis });
   } catch (error) {
-    console.error("Analysis endpoint error:", error.message);
+    console.error(
+      "Analysis endpoint error:",
+      error.message
+    );
 
     return res.status(500).json({
       error: "An unexpected server error occurred."
