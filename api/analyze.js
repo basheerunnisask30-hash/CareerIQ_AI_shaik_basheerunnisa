@@ -1,5 +1,5 @@
 
-async function fetchWithRetry(url, options, maxAttempts = 3) {
+async function fetchWithRetry(url, options, maxAttempts = 2) {
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     let response;
 
@@ -9,40 +9,33 @@ async function fetchWithRetry(url, options, maxAttempts = 3) {
         signal: AbortSignal.timeout(30000)
       });
     } catch (error) {
-      if (error.name === "TimeoutError" ||
-        error.name === "AbortError") {
-        if (attempt === maxAttempts - 1) {
-          throw new Error(
-            "The AI request timed out after multiple attempts. Please try again later."
-          );
-        }
-      } else if (attempt === maxAttempts - 1) {
-        throw error;
+      if (error.name === "TimeoutError" || error.name === "AbortError") {
+        throw new Error(
+          "Gemini took too long to respond. Please try again later."
+        );
       }
 
-      await new Promise(resolve =>
-        setTimeout(resolve, 1000 * (2 ** attempt))
+      throw new Error(
+        "Could not connect to Gemini. Please check your connection and try again."
       );
-
-      continue;
     }
 
-    // Never retry 429 responses. They may indicate
-    // an exhausted daily quota.
-    if (response.status === 429) return response;
+    // Never retry 429 (rate limit / quota).
+    if (response.status === 429) {
+      return response;
+    }
 
-    // Retry only temporary server errors.
+    // Only 500/503 are retried, and only once.
     if (![500, 503].includes(response.status)) {
       return response;
     }
 
-    if (attempt === maxAttempts - 1) return response;
+    if (attempt === maxAttempts - 1) {
+      return response;
+    }
 
     await response.body?.cancel();
-
-    await new Promise(resolve =>
-      setTimeout(resolve, 1000 * (2 ** attempt))
-    );
+    await new Promise(resolve => setTimeout(resolve, 1500));
   }
 }
 
@@ -165,14 +158,19 @@ export default async function handler(req, res) {
     }
 
     return res.status(200).json({ analysis });
-  } catch (error) {
-    console.error(
-      "Analysis endpoint error:",
-      error.message
-    );
+  } catch {
+    console.error("Analysis endpoint error:", error.message);
+
+    if (error.message.includes("too long to respond")) {
+      return res.status(504).json({ error: error.message });
+    }
+
+    if (error.message.includes("Could not connect to Gemini")) {
+      return res.status(502).json({ error: error.message });
+    }
 
     return res.status(500).json({
-      error: "An unexpected server error occurred."
+      error: "An unexpected server error occurred. Please try again later."
     });
   }
 }
