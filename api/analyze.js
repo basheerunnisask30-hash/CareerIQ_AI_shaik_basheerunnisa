@@ -11,16 +11,19 @@ async function fetchWithRetry(url, options, maxAttempts = 3) {
     } catch (error) {
       if (error.name === "TimeoutError" ||
         error.name === "AbortError") {
-        throw new Error(
-          "The AI request timed out. Please try again."
-        );
+        if (attempt === maxAttempts - 1) {
+          throw new Error(
+            "The AI request timed out after multiple attempts. Please try again later."
+          );
+        }
+      } else if (attempt === maxAttempts - 1) {
+        throw error;
       }
-
-      if (attempt === maxAttempts - 1) throw error;
 
       await new Promise(resolve =>
         setTimeout(resolve, 1000 * (2 ** attempt))
       );
+
       continue;
     }
 
