@@ -1045,7 +1045,7 @@ Rules:
         status.textContent = "Extracting resume text...";
 
         pdfjsLib.GlobalWorkerOptions.workerSrc =
-          "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent";
+          "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
 
         const buffer = await file.arrayBuffer();
         const pdf = await pdfjsLib.getDocument({
