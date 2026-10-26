@@ -75,7 +75,7 @@ export default async function handler(req, res) {
       "\n\nProvide your analysis as a JSON object with the exact fields specified.";
 
     const response = await fetchWithRetry(
-      "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent",
+      "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent",
       {
         method: "POST",
         headers: {
